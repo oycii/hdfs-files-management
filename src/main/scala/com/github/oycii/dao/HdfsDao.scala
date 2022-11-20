@@ -2,11 +2,12 @@ package com.github.oycii.dao
 
 import com.typesafe.scalalogging.Logger
 
-import java.io.{BufferedInputStream, File, FileInputStream, InputStream}
+import java.io.{BufferedInputStream, File, FileInputStream, IOException, InputStream, OutputStream}
 import org.apache.hadoop.conf._
 import org.apache.hadoop.fs._
+import org.apache.hadoop.io.IOUtils
 
-import scala.collection.mutable
+import scala.collection.{immutable, mutable}
 
 class HdfsDao(fileSystem: FileSystem) extends IFileSystem {
   val logger = Logger(getClass.getName)
@@ -16,29 +17,6 @@ class HdfsDao(fileSystem: FileSystem) extends IFileSystem {
     out.close()
   }
 
-  override def saveFile(filepath: String): Unit = {
-    val file = new File(filepath)
-    val out = fileSystem.create(new Path(file.getName))
-    val in = new BufferedInputStream(new FileInputStream(file))
-    try {
-      var b = new Array[Byte](1024)
-      var numBytes = in.read(b)
-      while (numBytes > 0) {
-        out.write(b, 0, numBytes)
-        numBytes = in.read(b)
-      }
-    } finally {
-      if (in != null)
-        in.close()
-      if (out != null)
-        out.close()
-    }
-  }
-
-  override  def removeFile(filename: String): Boolean = {
-    val path = new Path(filename)
-    fileSystem.delete(path, true)
-  }
 
   override def getFile(filename: String): InputStream = {
     val path = new Path(filename)
@@ -62,11 +40,6 @@ class HdfsDao(fileSystem: FileSystem) extends IFileSystem {
     }
 
     files.toList
-
-  }
-
-  private def createFileDtoOfFolder(fileStatus: LocatedFileStatus): FileDto = {
-    FileDto(fileStatus.getPath.getParent.toString, true)
   }
 
   override def getFolders(folderPath: String): List[FileDto] = {
@@ -89,7 +62,7 @@ class HdfsDao(fileSystem: FileSystem) extends IFileSystem {
     getFiles(folderPathHdfs)
   }
 
-  def concatFiles(targetFilePath: String, files: List[FileDto], pathConcatFile: String): Unit = {
+  override def concatFiles(targetFilePath: String, files: List[FileDto], pathConcatFile: String): Unit = {
     val psrcs: Array[Path] = files.map(fileDto => new Path(fileDto.path)).toArray
     logger.info("concatFiles to: " + targetFilePath + " from: " + psrcs.mkString(","))
 
@@ -98,12 +71,31 @@ class HdfsDao(fileSystem: FileSystem) extends IFileSystem {
     renameFile(targetFilePath, pathConcatFile)
   }
 
-  def renameFile(fromPathFile: String, toPathFile: String): Boolean = {
+  override def renameFile(fromPathFile: String, toPathFile: String): Boolean = {
     fileSystem.rename(new Path(fromPathFile), new Path(toPathFile))
   }
 
-  def copyFile(fromPath: Path, toPath: Path): Unit = {
+  private def copyFile(fromPath: Path, toPath: Path): Unit = {
     FileUtil.copy(fileSystem, fromPath, fileSystem, toPath, false, fileSystem.getConf)
+  }
+
+  private def copyFile(fromPath: Path, toPath: Path, withAppendText: String): Unit = {
+    var in: FSDataInputStream = null
+    var out: FSDataOutputStream = null
+    try {
+      in =  fileSystem.open(fromPath)
+      out = fileSystem.create(toPath, false)
+      IOUtils.copyBytes(in, out, fileSystem.getConf, false)
+      out.write(withAppendText.getBytes)
+    } catch {
+      case e: IOException =>
+        IOUtils.closeStream(out)
+        IOUtils.closeStream(in)
+        throw e
+    } finally {
+      if (in != null) IOUtils.closeStream(in)
+      if (out != null ) IOUtils.closeStream(out)
+    }
   }
 
   private def getFileSizeByPath(pathFile: String): Long = {
@@ -114,7 +106,7 @@ class HdfsDao(fileSystem: FileSystem) extends IFileSystem {
     length
   }
 
-  def copyFiles(fromDirPath: String, toFolderPath: String, files: List[FileDto]): Int = {
+  override def copyFiles(fromDirPath: String, toFolderPath: String, files: List[FileDto]): List[String] = {
     val copyFiles = files.filter(f => {
       if (getFileSizeByPath(f.path) > 0)
         true
@@ -122,22 +114,25 @@ class HdfsDao(fileSystem: FileSystem) extends IFileSystem {
         logger.warn(s"File size of ${f.path} equal 0")
         false
       }
-
     })
+
+    val listCopyFiles = mutable.ListBuffer[String]()
 
     copyFiles.foreach(f => {
       val sizeFile =  getFileSizeByPath(f.path)
       if (sizeFile > 0) {
         val pathFileFrom = new Path(f.path)
         val pathFileTo = new Path(f.path.replaceFirst(fromDirPath, toFolderPath))
-        copyFile(pathFileFrom, pathFileTo)
+        copyFile(pathFileFrom, pathFileTo, "\n")
+        listCopyFiles.addOne(pathFileTo.toString)
       }
     })
 
-    copyFiles.length
+    listCopyFiles.toList
   }
 
-  def dropFile(filePath: String): Unit = {
+  override def dropFile(filePath: String): Unit = {
     fileSystem.delete(new Path(filePath), false)
   }
+
 }

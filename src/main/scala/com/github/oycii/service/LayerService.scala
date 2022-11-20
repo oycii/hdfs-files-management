@@ -16,7 +16,7 @@ object LayerService extends LazyLogging {
     files.filter(fileDao => fileDao.path.takeRight(ext.length) == ext)
   }
 
-  private def copyFiles(fromDirPath: String, toDirPath: String, ext: String)(implicit hdfsDao: HdfsDao): Int = {
+  private def copyFiles(fromDirPath: String, toDirPath: String, ext: String)(implicit hdfsDao: HdfsDao): List[String] = {
     val folderFiles = filterFilesByExt(hdfsDao.getFolderFiles(fromDirPath), ext)
     hdfsDao.copyFiles(fromDirPath, toDirPath, folderFiles)
   }
@@ -33,15 +33,15 @@ object LayerService extends LazyLogging {
     listFolders.foreach(fileDto => {
       val fromDir = fileDto.path
       val toDir = fromDir.replaceFirst(stageDirPath, odsDirPath)
-      val countCopyFiles = copyFiles(fromDir, toDir, ext)
-      if (countCopyFiles > 0) {
+      val copyFilesTo = copyFiles(fromDir, toDir, ext)
+      if (copyFilesTo.length > 0) {
         val filePathConcatOfFolder = fileDto.path.replaceFirst(NAME_STAGE_FOLDER, NAME_ODS_FOLDER)
         val pathTmpConcatFile = filePathConcatOfFolder + PATH_SEPARATOR + TMP_FILE_CONCAT
         val pathConcatFile = filePathConcatOfFolder + PATH_SEPARATOR + CONCAT_FILE_NAME
         concatFolderFiles(pathTmpConcatFile, toDir, pathConcatFile)
       }
       dropFiles(fromDir, ext)
-      logger.info(s"moved data from: ${fromDir} to ${toDir}, count files: ${countCopyFiles}")
+      logger.info(s"moved data from: ${fromDir} to ${toDir}, count files: ${copyFilesTo.length}")
     })
   }
 }

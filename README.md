@@ -52,3 +52,30 @@ http://127.0.0.1:9870/explorer.html#/
 ``` text
 docker exec namenode hdfs dfs -chown -R sanya:sanya /
 ```
+
+## Просмотр файла в консоле
+``` text
+docker exec namenode hadoop fs -cat /ods/date=2020-12-03/part-0000.csv
+```
+
+## Редактирование данных в docker
+
+docker exec -it namenode bash
+docker exec -it datanode bash
+
+Исталляция редактора в Docker
+``` text
+apt-get update
+apt-get install nano
+```
+
+
+## Остановить все контейнеры
+
+``` text
+docker stop $(docker ps -a -q)
+```
+## Удалить все контейнеры
+``` text
+docker rm $(docker ps -a -q)
+```
